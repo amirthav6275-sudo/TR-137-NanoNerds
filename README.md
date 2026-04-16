@@ -1,75 +1,17 @@
 Project Idea
-Reviews are treated like DNA — if they share too much similarity, they likely come from the same source.
-This project visualizes reviews as a network and detects suspicious patterns by analyzing how closely reviews resemble each other.
-
-Features
- Detect fake reviews using similarity analysis
- Interactive phylogenetic-style network visualization
- Risk scoring system (0–100)
- AI-powered review analysis (Claude API)
- Real-time updates when adding new reviews
- Fully browser-based (no server required)
-
-HOW IT WORKS
-
-1.PHYLOGENETIC TREE(NETWORK VIEW)
-Compares every review with others using Levenshtein Distance
-Connects similar reviews:
-Thicker edges = higher similarity
-Uses Union-Find algorithm to form clusters
-Each node represents a review:
-🔴 Red → High Risk / Fake
-🟡 Yellow → Suspicious
-🟢 Green → Authentic
-Click any node to view:
-Review content
-Similar reviews
-Risk insights
-
-2.REVIEWS DASHBOARD
-Displays all reviews with a Risk Score (0–100) based on:
-High similarity with other reviews
-Duplicate or near-copy content
-Extreme ratings (1★ or 5★)
-Very short or generic text
-
-3.AI ANALYSIS
-Paste any review for deep analysis
-Uses Claude API (direct browser integration)
-Returns:
-Fake probability score
-Verdict:
-Authentic
-Suspicious
-Likely Fake
-Detected signals (e.g., generic language, exaggeration)
-Human-readable explanation
-
-4.ADD REVIEW(REAL-TIME)
-Add new reviews instantly
-Automatically:
-Recalculates similarity
-Updates clusters
-Re-renders graph
-Assigns risk score
-
-CORE CONCEPTS USED
-Levenshtein Distance → Text similarity measurement
-Union-Find Algorithm → Clustering similar reviews
-Graph Visualization → Network-based analysis
-AI/NLP → Contextual fake detection
-
-TECH STACK
-HTML, CSS, JavaScript
-Graph Visualization (D3.js or similar)
-Claude API (AI analysis)
-No backend (runs entirely in browser)
-
-USE CASES 
-Detect spam or bot-generated reviews.
-Analyzse e-commerce or restaurant reviews.
-
-
-
+PhyloShield is a fake review detection and moderation platform. Here's a breakdown:
+Core Purpose
+It detects, analyzes, and blocks coordinated fake/bot-generated reviews on platforms (e.g., e-commerce, app stores, marketplaces) using a combination of AI analysis, IP intelligence, and phylogenetic clustering — a biological concept borrowed to find "evolutionary" similarities between review texts.
+How It Works
+It analyzes reviews for fakeness using a fraud score, groups suspiciously similar reviews into clusters (the "phylogenetic tree"), tracks the IP addresses behind submissions (flagging VPNs, proxies, datacenter IPs), and auto-blocks coordinated bot attacks in real time.
+Real-World Applications
+E-commerce platforms (Amazon, eBay, Etsy) — catch sellers who flood their own products with 5-star bot reviews to manipulate rankings.
+App stores (Google Play, Apple App Store) — detect coordinated campaigns that artificially boost or tank app ratings.
+Hotel & restaurant sites (TripAdvisor, Yelp, Booking.com) — identify fake positive reviews bought from review farms, or fake negative reviews targeting competitors.
+SaaS & product review sites (G2, Trustpilot, Capterra) — protect review integrity from astroturfing campaigns.
+News & content platforms — spot coordinated inauthentic behavior in comment sections.
+What Makes It Distinctive
+The "phylogenetic" angle is the interesting part — it treats reviews like DNA sequences, finding template-based patterns (slight rewording of the same base text) that reveal a shared origin, much like how biologists trace species ancestry. This is more powerful than simple duplicate detection.
+In short, it's a cybersecurity-meets-NLP tool for protecting the integrity of user-generated review ecosystems.
 
 
