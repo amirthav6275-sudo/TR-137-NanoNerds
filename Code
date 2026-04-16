@@ -1,588 +1,132 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>PhyloDetect — Fake Review Detection</title>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;600;700;800&display=swap" rel="stylesheet" />
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>PhyloShield — Fake Review Detection Platform</title>
+
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;800;900&family=Rajdhani:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500;700&display=swap" rel="stylesheet"/>
+
 <style>
-  *{box-sizing:border-box;margin:0;padding:0;}
-  :root{
-    --bg:#0a0e1a;--panel:#0f1525;--border:#1e2d4a;
-    --accent:#00e5ff;--accent2:#7c3aed;
-    --danger:#ff3b6b;--safe:#00d97e;--warn:#ffb020;
-    --text:#e2e8f0;--muted:#64748b;
-  }
-  body{background:var(--bg);color:var(--text);font-family:'IBM Plex Mono','Courier New',monospace;min-height:100vh;}
-  ::-webkit-scrollbar{width:5px;} ::-webkit-scrollbar-track{background:var(--bg);} ::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px;}
+/* ====== BASIC RESET ====== */
+*{box-sizing:border-box;margin:0;padding:0;}
+body{
+  background:#030508;
+  color:#d1e8ff;
+  font-family:'Rajdhani',sans-serif;
+}
 
-  /* HEADER */
-  #header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;align-items:center;gap:16px;background:rgba(15,21,37,0.95);position:sticky;top:0;z-index:100;}
-  #logo-icon{width:38px;height:38px;border-radius:50%;background:linear-gradient(135deg,var(--accent2),var(--accent));display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0;}
-  #logo-text{font-family:'Space Grotesk',sans-serif;font-size:17px;font-weight:800;letter-spacing:.05em;}
-  #logo-text span{color:var(--accent);}
-  #logo-sub{font-size:9px;color:var(--muted);letter-spacing:.2em;margin-top:2px;}
-  #stats{margin-left:auto;display:flex;gap:28px;}
-  .stat{text-align:center;}
-  .stat-val{font-family:'Space Grotesk',sans-serif;font-size:22px;font-weight:700;}
-  .stat-label{font-size:9px;color:var(--muted);letter-spacing:.15em;}
+/* ====== SIMPLE LAYOUT ====== */
+#app{
+  padding:20px;
+}
 
-  /* TABS */
-  #tabs{border-bottom:1px solid var(--border);display:flex;padding-left:20px;background:var(--panel);}
-  .tab{background:none;border:none;border-bottom:2px solid transparent;padding:10px 22px;font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.1em;cursor:pointer;color:var(--muted);transition:all .2s;}
-  .tab.active{color:var(--accent);border-bottom-color:var(--accent);}
-  .tab:hover:not(.active){color:#94a3b8;}
+/* ====== BUTTON ====== */
+button{
+  padding:8px 12px;
+  background:#0a3d6b;
+  color:#00f5ff;
+  border:1px solid #00f5ff;
+  border-radius:6px;
+  cursor:pointer;
+}
 
-  /* LAYOUT */
-  #app{display:flex;min-height:calc(100vh - 111px);}
-  #main{flex:1;padding:22px 26px;overflow:auto;}
-  #side{width:310px;border-left:1px solid var(--border);padding:18px;overflow:auto;flex-shrink:0;}
+/* ====== CARD ====== */
+.card{
+  background:#0b1120;
+  padding:12px;
+  border-radius:8px;
+  margin-bottom:10px;
+}
 
-  /* TAB PANELS */
-  .tab-panel{display:none;} .tab-panel.active{display:block;}
-
-  /* TREE TAB */
-  #tree-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;}
-  #tree-title{font-size:12px;font-weight:600;color:var(--accent);letter-spacing:.1em;}
-  #tree-sub{font-size:10px;color:var(--muted);margin-top:3px;}
-  #add-btn{background:rgba(124,58,237,.15);border:1px solid var(--accent2);color:var(--accent);padding:6px 14px;border-radius:6px;cursor:pointer;font-size:10px;letter-spacing:.1em;font-family:inherit;transition:all .2s;}
-  #add-btn:hover{background:rgba(124,58,237,.3);}
-  #add-box{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:14px;display:none;}
-  #add-box.show{display:block;animation:fadeIn .3s ease;}
-  #add-textarea{width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:10px 14px;border-radius:6px;font-size:12px;font-family:inherit;line-height:1.5;resize:none;outline:none;transition:border-color .2s;}
-  #add-textarea:focus{border-color:var(--accent);}
-  .add-actions{display:flex;gap:8px;margin-top:8px;}
-  .btn-primary{background:var(--accent);color:#000;border:none;padding:6px 16px;border-radius:5px;cursor:pointer;font-size:11px;font-weight:700;font-family:inherit;}
-  .btn-ghost{background:transparent;color:var(--muted);border:1px solid var(--border);padding:6px 14px;border-radius:5px;cursor:pointer;font-size:11px;font-family:inherit;}
-  #svg-wrap{background:var(--panel);border:1px solid var(--border);border-radius:12px;overflow:hidden;}
-  #tree-svg{width:100%;display:block;}
-  #tree-note{margin-top:10px;padding:10px 14px;background:rgba(0,229,255,.05);border:1px solid rgba(0,229,255,.15);border-radius:8px;font-size:10px;color:var(--muted);line-height:1.6;}
-  #tree-note span{color:var(--accent);}
-
-  /* REVIEWS TAB */
-  #reviews-title{font-size:12px;font-weight:600;color:var(--accent);letter-spacing:.1em;margin-bottom:14px;}
-  #reviews-list{display:flex;flex-direction:column;gap:10px;}
-  .review-card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:14px 16px;cursor:pointer;transition:all .2s;}
-  .review-card:hover{background:#1a2540;}
-  .review-card.selected{border-color:var(--accent);}
-  .rc-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:6px;}
-  .rc-left{display:flex;align-items:center;gap:10px;}
-  .rc-id{font-size:10px;color:var(--muted);}
-  .rc-badge{font-size:9px;letter-spacing:.15em;padding:2px 8px;border-radius:4px;font-weight:600;}
-  .rc-author{font-size:10px;color:var(--muted);}
-  .rc-right{display:flex;align-items:center;gap:8px;}
-  .rc-date{font-size:10px;color:var(--muted);}
-  .risk-bar-wrap{width:48px;height:5px;background:var(--border);border-radius:3px;overflow:hidden;}
-  .risk-bar{height:100%;border-radius:3px;}
-  .rc-score{font-size:11px;font-weight:700;min-width:26px;text-align:right;}
-  .rc-text{font-size:12px;color:var(--text);line-height:1.55;}
-
-  /* ANALYZE TAB */
-  #analyze-wrap{max-width:660px;margin:0 auto;}
-  #analyze-title{font-size:12px;font-weight:600;color:var(--accent);letter-spacing:.1em;margin-bottom:4px;}
-  #analyze-sub{font-size:10px;color:var(--muted);margin-bottom:16px;}
-  #analyze-textarea{width:100%;background:var(--panel);border:1px solid var(--border);color:var(--text);padding:14px 16px;border-radius:10px;font-size:13px;font-family:inherit;line-height:1.6;resize:none;outline:none;transition:border-color .2s;}
-  #analyze-textarea:focus{border-color:var(--accent);}
-  #analyze-btn{margin-top:12px;background:linear-gradient(135deg,var(--accent2),var(--accent));color:#000;border:none;padding:10px 28px;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700;letter-spacing:.1em;font-family:inherit;transition:all .2s;}
-  #analyze-btn:disabled{background:var(--border);color:var(--muted);cursor:not-allowed;}
-  #analyze-loading{margin-top:18px;padding:20px;background:var(--panel);border:1px solid var(--border);border-radius:10px;text-align:center;display:none;}
-  #analyze-loading.show{display:block;}
-  .pulse{animation:pulse 1.8s infinite;}
-  @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.4;}}
-  #analyze-result{margin-top:18px;display:none;}
-  #analyze-result.show{display:block;animation:fadeIn .4s ease;}
-  .result-card{background:var(--panel);border-radius:12px;overflow:hidden;}
-  .result-top{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:16px;}
-  .result-score{font-family:'Space Grotesk',sans-serif;font-size:40px;font-weight:700;}
-  .result-verdict{font-size:14px;font-weight:700;}
-  .result-label{font-size:9px;color:var(--muted);letter-spacing:.1em;margin-top:2px;}
-  .result-body{padding:16px 20px;}
-  .result-section-label{font-size:10px;color:var(--muted);letter-spacing:.1em;margin-bottom:8px;}
-  .signals-wrap{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px;}
-  .signal-tag{font-size:10px;background:rgba(255,59,107,.1);border:1px solid rgba(255,59,107,.3);color:var(--danger);padding:4px 10px;border-radius:4px;}
-  .result-reasoning{font-size:12px;color:var(--text);line-height:1.7;}
-
-  /* SIDE PANEL */
-  #side-empty{text-align:center;margin-top:60px;color:var(--muted);}
-  #side-empty .icon{font-size:34px;margin-bottom:12px;}
-  #side-empty .title{font-size:11px;letter-spacing:.1em;}
-  #side-empty .sub{font-size:10px;margin-top:6px;line-height:1.6;}
-  #side-detail{display:none;} #side-detail.show{display:block;animation:fadeIn .3s ease;}
-  #sd-label{font-size:10px;color:var(--muted);letter-spacing:.15em;margin-bottom:12px;}
-  #sd-text{padding:12px;background:rgba(10,14,26,.8);border:1px solid var(--border);border-radius:8px;font-size:11px;line-height:1.7;margin-bottom:12px;}
-  #sd-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px;}
-  .sd-cell{background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:8px 10px;}
-  .sd-cell-label{font-size:8px;color:var(--muted);letter-spacing:.1em;margin-bottom:3px;}
-  .sd-cell-val{font-size:11px;}
-  #sd-sim-title{font-size:10px;color:var(--muted);letter-spacing:.1em;margin-bottom:8px;}
-  #sd-similar{display:flex;flex-direction:column;gap:7px;}
-  .sim-card{background:var(--panel);border:1px solid var(--border);border-radius:7px;padding:9px 11px;cursor:pointer;transition:background .15s;}
-  .sim-card:hover{background:#1a2540;}
-  .sim-top{display:flex;justify-content:space-between;margin-bottom:4px;}
-  .sim-id{font-size:9px;color:var(--muted);}
-  .sim-pct{font-size:10px;font-weight:700;}
-  .sim-text{font-size:10px;color:var(--text);line-height:1.45;}
-  #sd-ai-btn{width:100%;margin-top:12px;background:rgba(124,58,237,.15);border:1px solid var(--accent2);color:var(--accent);padding:8px;border-radius:7px;cursor:pointer;font-size:10px;letter-spacing:.1em;font-family:inherit;transition:all .2s;}
-  #sd-ai-btn:hover{background:rgba(124,58,237,.3);}
-
-  @keyframes fadeIn{from{opacity:0;transform:translateY(7px);}to{opacity:1;transform:translateY(0);}}
+/* ====== TEXTAREA ====== */
+textarea{
+  width:100%;
+  padding:10px;
+  border-radius:6px;
+  background:#0e1628;
+  color:white;
+  border:1px solid #1e2f4a;
+}
 </style>
 </head>
+
 <body>
 
-<!-- HEADER -->
-<div id="header">
-  <div id="logo-icon">🧬</div>
-  <div>
-    <div id="logo-text">PHYLO<span>DETECT</span></div>
-    <div id="logo-sub">FAKE REVIEW DETECTION SYSTEM</div>
-  </div>
-  <div id="stats">
-    <div class="stat"><div class="stat-val" id="stat-total">0</div><div class="stat-label">TOTAL</div></div>
-    <div class="stat"><div class="stat-val" style="color:var(--danger)" id="stat-fake">0</div><div class="stat-label">FAKE</div></div>
-    <div class="stat"><div class="stat-val" style="color:var(--warn)" id="stat-suspect">0</div><div class="stat-label">SUSPECT</div></div>
-  </div>
-</div>
-
-<!-- TABS -->
-<div id="tabs">
-  <button class="tab active" data-tab="tree">🌿 PHYLO TREE</button>
-  <button class="tab" data-tab="reviews">📋 REVIEWS</button>
-  <button class="tab" data-tab="analyze">🔬 AI ANALYZE</button>
-</div>
-
-<!-- APP -->
 <div id="app">
-  <div id="main">
+  <h2>PhyloShield Demo</h2>
 
-    <!-- TREE TAB -->
-    <div id="tab-tree" class="tab-panel active">
-      <div id="tree-header">
-        <div>
-          <div id="tree-title">PHYLOGENETIC SIMILARITY NETWORK</div>
-          <div id="tree-sub">Nodes grouped by textual mutation distance. Clusters reveal coordinated fake campaigns.</div>
-        </div>
-        <button id="add-btn" onclick="toggleAddBox()">+ ADD REVIEW</button>
-      </div>
-      <div id="add-box">
-        <textarea id="add-textarea" rows="2" placeholder="Paste a review to add to the network..."></textarea>
-        <div class="add-actions">
-          <button class="btn-primary" onclick="addReview()">ADD</button>
-          <button class="btn-ghost" onclick="toggleAddBox()">CANCEL</button>
-        </div>
-      </div>
-      <div id="svg-wrap">
-        <svg id="tree-svg" viewBox="0 0 720 380"></svg>
-      </div>
-      <div id="tree-note">
-        💡 <span>Phylogenetic method:</span> Reviews are treated like DNA sequences. Levenshtein edit-distance measures textual mutation. Clusters of near-identical reviews reveal <em>coordinated fake review campaigns</em> — just as genetic lineages reveal shared ancestors.
-      </div>
-    </div>
+  <textarea id="reviewInput" rows="4" placeholder="Enter review..."></textarea>
+  <br><br>
+  <button onclick="analyze()">Analyze Review</button>
 
-    <!-- REVIEWS TAB -->
-    <div id="tab-reviews" class="tab-panel">
-      <div id="reviews-title">ALL REVIEWS — RISK ASSESSMENT</div>
-      <div id="reviews-list"></div>
-    </div>
-
-    <!-- ANALYZE TAB -->
-    <div id="tab-analyze" class="tab-panel">
-      <div id="analyze-wrap">
-        <div id="analyze-title">AI-POWERED REVIEW ANALYZER</div>
-        <div id="analyze-sub">Paste any review to get a deep authenticity analysis using Claude AI.</div>
-        <textarea id="analyze-textarea" rows="5" placeholder="Paste a product review here to analyze it for signs of being fake..."></textarea>
-        <button id="analyze-btn" onclick="runAnalysis()">🔬 ANALYZE REVIEW</button>
-        <div id="analyze-loading">
-          <div class="pulse" style="font-size:12px;color:var(--accent);letter-spacing:.15em;">RUNNING PHYLOGENETIC ANALYSIS...</div>
-          <div style="font-size:10px;color:var(--muted);margin-top:5px;">Comparing linguistic DNA sequences</div>
-        </div>
-        <div id="analyze-result">
-          <div class="result-card" id="result-card">
-            <div class="result-top">
-              <div>
-                <div class="result-score" id="result-score"></div>
-                <div class="result-verdict" id="result-verdict"></div>
-                <div class="result-label">FAKE PROBABILITY SCORE</div>
-              </div>
-              <svg id="result-gauge" width="80" height="80" viewBox="0 0 80 80" style="margin-left:auto;">
-                <circle cx="40" cy="40" r="32" fill="none" stroke="var(--border)" stroke-width="8"/>
-                <circle id="gauge-arc" cx="40" cy="40" r="32" fill="none" stroke-width="8" stroke-linecap="round" transform="rotate(-90 40 40)" stroke-dasharray="0 201" stroke-dashoffset="50"/>
-              </svg>
-            </div>
-            <div class="result-body">
-              <div class="result-section-label">DETECTED SIGNALS</div>
-              <div class="signals-wrap" id="result-signals"></div>
-              <div class="result-section-label">ANALYSIS</div>
-              <div class="result-reasoning" id="result-reasoning"></div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-  </div><!-- /main -->
-
-  <!-- SIDE PANEL -->
-  <div id="side">
-    <div id="side-empty">
-      <div class="icon">🧬</div>
-      <div class="title">SELECT A NODE</div>
-      <div class="sub">Click any review node in the tree to inspect its details and similar reviews</div>
-    </div>
-    <div id="side-detail">
-      <div id="sd-label"></div>
-      <div id="sd-text"></div>
-      <div id="sd-grid"></div>
-      <div id="sd-sim-title">SIMILAR REVIEWS</div>
-      <div id="sd-similar"></div>
-      <button id="sd-ai-btn" onclick="sendToAnalyze()">🔬 DEEP ANALYZE WITH AI</button>
-    </div>
-  </div>
+  <div id="result"></div>
 </div>
 
 <script>
-const REVIEWS = [
-  {id:1,text:"Amazing product! Best purchase ever. Highly recommend to everyone!",author:"user_a1",date:"2024-01-15",rating:5},
-  {id:2,text:"Amazing product! Best purchase I made. Highly recommend for everyone!",author:"user_b2",date:"2024-01-15",rating:5},
-  {id:3,text:"Amazing! Best purchase ever. Highly recommend this to all!",author:"user_c3",date:"2024-01-16",rating:5},
-  {id:4,text:"Terrible quality, broke after one day. Very disappointed with this.",author:"user_d4",date:"2024-01-10",rating:1},
-  {id:5,text:"Great value for money. Works as described. Fast shipping too!",author:"user_e5",date:"2024-01-12",rating:4},
-  {id:6,text:"Amazing product! Greatest purchase ever. Highly recommend to all people!",author:"user_f6",date:"2024-01-16",rating:5},
-  {id:7,text:"Excellent item. Very satisfied with my order. Will buy again soon.",author:"user_g7",date:"2024-01-20",rating:5},
-  {id:8,text:"Excellent item! Very satisfied with order. Will definitely buy again!",author:"user_h8",date:"2024-01-20",rating:5},
-  {id:9,text:"Not worth the price. Quality is poor. Wouldn't recommend to anyone.",author:"user_i9",date:"2024-01-11",rating:2},
-  {id:10,text:"Exceeded all my expectations! Fast delivery and great packaging overall.",author:"user_j10",date:"2024-01-18",rating:5},
-  {id:11,text:"Excellent item. Very satisfied with my purchase. Will buy again!",author:"user_k11",date:"2024-01-21",rating:5},
-  {id:12,text:"Good product. Meets expectations. Decent quality for the price.",author:"user_l12",date:"2024-01-14",rating:3},
+/* ===== SAMPLE DATA ===== */
+const SAMPLE_REVIEWS = [
+  "Amazing product! Best purchase ever!",
+  "Amazing product! Best purchase I made!",
+  "Terrible quality, broke in one day",
+  "Excellent item. Very satisfied."
 ];
 
-let reviews = [...REVIEWS];
-let selectedId = null;
-
-// ---- UTILS ----
+/* ===== LEVENSHTEIN DISTANCE ===== */
 function levenshtein(a,b){
   const m=a.length,n=b.length;
-  const dp=Array.from({length:m+1},(_,i)=>Array.from({length:n+1},(_,j)=>i===0?j:j===0?i:0));
-  for(let i=1;i<=m;i++) for(let j=1;j<=n;j++) dp[i][j]=a[i-1]===b[j-1]?dp[i-1][j-1]:1+Math.min(dp[i-1][j],dp[i][j-1],dp[i-1][j-1]);
+  const dp=Array.from({length:m+1},()=>Array(n+1).fill(0));
+
+  for(let i=0;i<=m;i++) dp[i][0]=i;
+  for(let j=0;j<=n;j++) dp[0][j]=j;
+
+  for(let i=1;i<=m;i++){
+    for(let j=1;j<=n;j++){
+      dp[i][j]=a[i-1]===b[j-1]
+        ? dp[i-1][j-1]
+        : 1+Math.min(dp[i-1][j],dp[i][j-1],dp[i-1][j-1]);
+    }
+  }
   return dp[m][n];
 }
-function similarity(a,b){const d=levenshtein(a.toLowerCase(),b.toLowerCase());return 1-d/Math.max(a.length,b.length);}
-function fakeScore(review,all){
-  let s=0;
-  const sims=all.filter(r=>r.id!==review.id).map(r=>similarity(review.text,r.text));
-  const max=Math.max(...sims,0);
-  const high=sims.filter(x=>x>0.55).length;
-  if(max>0.75)s+=50;else if(max>0.55)s+=30;
-  if(high>2)s+=20;
-  if(review.rating===5||review.rating===1)s+=10;
-  if(review.text.split(' ').length<12)s+=10;
-  return Math.min(s,100);
-}
-function scoreColor(s){return s>60?'var(--danger)':s>30?'var(--warn)':'var(--safe)';}
-function scoreLabel(s){return s>60?'FAKE':s>30?'SUSPECT':'AUTHENTIC';}
 
-// ---- STATS ----
-function updateStats(){
-  document.getElementById('stat-total').textContent=reviews.length;
-  document.getElementById('stat-fake').textContent=reviews.filter(r=>fakeScore(r,reviews)>60).length;
-  document.getElementById('stat-suspect').textContent=reviews.filter(r=>{const s=fakeScore(r,reviews);return s>30&&s<=60;}).length;
+/* ===== SIMILARITY ===== */
+function similarity(a,b){
+  const dist = levenshtein(a,b);
+  return 1 - dist / Math.max(a.length,b.length);
 }
 
-// ---- TABS ----
-document.querySelectorAll('.tab').forEach(btn=>{
-  btn.addEventListener('click',()=>{
-    document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
-    document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
-    btn.classList.add('active');
-    document.getElementById('tab-'+btn.dataset.tab).classList.add('active');
-    if(btn.dataset.tab==='reviews') renderReviews();
-  });
-});
+/* ===== FAKE SCORE ===== */
+function fakeScore(text){
+  let score = 0;
 
-// ---- ADD REVIEW ----
-function toggleAddBox(){
-  const box=document.getElementById('add-box');
-  box.classList.toggle('show');
-  if(box.classList.contains('show')) document.getElementById('add-textarea').focus();
-}
-function addReview(){
-  const txt=document.getElementById('add-textarea').value.trim();
-  if(!txt)return;
-  const id=reviews.length+1;
-  reviews.push({id,text:txt,author:`user_new${id}`,date:new Date().toISOString().split('T')[0],rating:5});
-  document.getElementById('add-textarea').value='';
-  document.getElementById('add-box').classList.remove('show');
-  updateStats();
-  renderTree();
-  selectReview(id);
+  const sims = SAMPLE_REVIEWS.map(r => similarity(text,r));
+  const maxSim = Math.max(...sims);
+
+  if(maxSim > 0.75) score += 50;
+  if(text.split(" ").length < 10) score += 20;
+
+  return Math.min(score,100);
 }
 
-// ---- TREE ----
-function buildClusters(){
-  const n=reviews.length;
-  const parent=reviews.map((_,i)=>i);
-  function find(x){return parent[x]===x?x:(parent[x]=find(parent[x]));}
-  const edges=[];
-  for(let i=0;i<n;i++) for(let j=i+1;j<n;j++){
-    const s=similarity(reviews[i].text,reviews[j].text);
-    if(s>0.45) edges.push({i,j,s});
-  }
-  edges.sort((a,b)=>b.s-a.s);
-  edges.forEach(({i,j})=>{const ci=find(i),cj=find(j);if(ci!==cj)parent[ci]=cj;});
-  const map={};
-  reviews.forEach((r,i)=>{const root=find(i);if(!map[root])map[root]=[];map[root].push(i);});
-  return Object.values(map);
+/* ===== ANALYZE FUNCTION ===== */
+function analyze(){
+  const input = document.getElementById("reviewInput").value;
+  const score = fakeScore(input);
+
+  let verdict = "AUTHENTIC";
+  if(score > 60) verdict = "FAKE";
+  else if(score > 35) verdict = "SUSPECT";
+
+  document.getElementById("result").innerHTML = `
+    <div class="card">
+      <h3>Result</h3>
+      <p><b>Score:</b> ${score}</p>
+      <p><b>Verdict:</b> ${verdict}</p>
+    </div>
+  `;
 }
-
-function renderTree(){
-  const svg=document.getElementById('tree-svg');
-  const W=720,H=380;
-  svg.setAttribute('viewBox',`0 0 ${W} ${H}`);
-  svg.innerHTML='';
-
-  // defs
-  svg.innerHTML=`<defs>
-    <filter id="glow"><feGaussianBlur stdDeviation="3" result="cb"/><feMerge><feMergeNode in="cb"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
-    <radialGradient id="gFake" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="#ff3b6b" stop-opacity=".9"/><stop offset="100%" stop-color="#7c0c28"/></radialGradient>
-    <radialGradient id="gSafe" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="#00d97e" stop-opacity=".9"/><stop offset="100%" stop-color="#004d2a"/></radialGradient>
-    <radialGradient id="gWarn" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="#ffb020" stop-opacity=".9"/><stop offset="100%" stop-color="#5a3d00"/></radialGradient>
-  </defs>`;
-
-  const clusters=buildClusters();
-  const pos={};
-  const R=14;
-
-  clusters.forEach((cluster,ci)=>{
-    const cx=70+(ci/Math.max(clusters.length-1,1))*(W-140);
-    cluster.forEach((idx,ni)=>{
-      const r=reviews[idx];
-      const spread=cluster.length>1?(ni/(cluster.length-1)-.5)*200:0;
-      const row=ni%2;
-      pos[r.id]={x:cx+spread*.55,y:95+row*130+(Math.floor(ni/2))*20};
-    });
-  });
-
-  // cluster backgrounds
-  clusters.forEach(cluster=>{
-    if(cluster.length<2)return;
-    const xs=cluster.map(i=>pos[reviews[i].id].x);
-    const ys=cluster.map(i=>pos[reviews[i].id].y);
-    const minX=Math.min(...xs)-28,maxX=Math.max(...xs)+28;
-    const minY=Math.min(...ys)-26,maxY=Math.max(...ys)+26;
-    const rect=document.createElementNS('http://www.w3.org/2000/svg','rect');
-    rect.setAttribute('x',minX);rect.setAttribute('y',minY);
-    rect.setAttribute('width',maxX-minX);rect.setAttribute('height',maxY-minY);
-    rect.setAttribute('rx','14');rect.setAttribute('fill','rgba(255,59,107,.06)');
-    rect.setAttribute('stroke','rgba(255,59,107,.25)');rect.setAttribute('stroke-width','1');
-    rect.setAttribute('stroke-dasharray','4 3');
-    svg.appendChild(rect);
-  });
-
-  // edges
-  for(let i=0;i<reviews.length;i++) for(let j=i+1;j<reviews.length;j++){
-    const s=similarity(reviews[i].text,reviews[j].text);
-    if(s<0.55)continue;
-    const p1=pos[reviews[i].id],p2=pos[reviews[j].id];
-    const line=document.createElementNS('http://www.w3.org/2000/svg','line');
-    line.setAttribute('x1',p1.x);line.setAttribute('y1',p1.y);
-    line.setAttribute('x2',p2.x);line.setAttribute('y2',p2.y);
-    line.setAttribute('stroke','#ff3b6b');
-    line.setAttribute('stroke-width',s*2.5);
-    line.setAttribute('stroke-opacity',(s-.55)/.45*.55);
-    line.setAttribute('stroke-linecap','round');
-    svg.appendChild(line);
-  }
-
-  // nodes
-  reviews.forEach(r=>{
-    const p=pos[r.id];if(!p)return;
-    const sc=fakeScore(r,reviews);
-    const fill=sc>60?'url(#gFake)':sc>30?'url(#gWarn)':'url(#gSafe)';
-    const isSelected=selectedId===r.id;
-
-    const g=document.createElementNS('http://www.w3.org/2000/svg','g');
-    g.style.cursor='pointer';
-    g.addEventListener('click',()=>selectReview(r.id));
-
-    if(isSelected){
-      const ring=document.createElementNS('http://www.w3.org/2000/svg','circle');
-      ring.setAttribute('cx',p.x);ring.setAttribute('cy',p.y);ring.setAttribute('r',R+8);
-      ring.setAttribute('fill','none');ring.setAttribute('stroke','#00e5ff');
-      ring.setAttribute('stroke-width','2');ring.setAttribute('filter','url(#glow)');ring.setAttribute('opacity','.8');
-      g.appendChild(ring);
-    }
-    const circle=document.createElementNS('http://www.w3.org/2000/svg','circle');
-    circle.setAttribute('cx',p.x);circle.setAttribute('cy',p.y);circle.setAttribute('r',R);
-    circle.setAttribute('fill',fill);
-    if(isSelected){circle.setAttribute('stroke','#00e5ff');circle.setAttribute('stroke-width','2');}
-    if(sc>60)circle.setAttribute('filter','url(#glow)');
-    g.appendChild(circle);
-
-    const txt=document.createElementNS('http://www.w3.org/2000/svg','text');
-    txt.setAttribute('x',p.x);txt.setAttribute('y',p.y+5);
-    txt.setAttribute('text-anchor','middle');txt.setAttribute('font-size','10');
-    txt.setAttribute('fill','white');txt.setAttribute('font-weight','700');
-    txt.style.pointerEvents='none';
-    txt.textContent=r.id;
-    g.appendChild(txt);
-    svg.appendChild(g);
-  });
-
-  // legend
-  [['#ff3b6b','High Risk'],['#ffb020','Suspect'],['#00d97e','Authentic']].forEach(([color,label],i)=>{
-    const g=document.createElementNS('http://www.w3.org/2000/svg','g');
-    g.setAttribute('transform',`translate(${18+i*110},${H-28})`);
-    const c=document.createElementNS('http://www.w3.org/2000/svg','circle');
-    c.setAttribute('cx','7');c.setAttribute('cy','7');c.setAttribute('r','6');
-    c.setAttribute('fill',color);c.setAttribute('opacity','.85');
-    const t=document.createElementNS('http://www.w3.org/2000/svg','text');
-    t.setAttribute('x','18');t.setAttribute('y','12');
-    t.setAttribute('font-size','10');t.setAttribute('fill','#64748b');
-    t.setAttribute('font-family','IBM Plex Mono, monospace');
-    t.textContent=label;
-    g.appendChild(c);g.appendChild(t);
-    svg.appendChild(g);
-  });
-}
-
-// ---- SELECT REVIEW ----
-function selectReview(id){
-  selectedId=id;
-  renderTree();
-  renderSidePanel();
-  // Also highlight in reviews list
-  document.querySelectorAll('.review-card').forEach(el=>{
-    el.classList.toggle('selected',el.dataset.id==id);
-  });
-}
-
-function renderSidePanel(){
-  const r=reviews.find(x=>x.id===selectedId);
-  if(!r){
-    document.getElementById('side-empty').style.display='block';
-    document.getElementById('side-detail').classList.remove('show');
-    return;
-  }
-  document.getElementById('side-empty').style.display='none';
-  const det=document.getElementById('side-detail');
-  det.classList.add('show');
-
-  const sc=fakeScore(r,reviews);
-  document.getElementById('sd-label').textContent=`REVIEW #${r.id} DETAILS`;
-  document.getElementById('sd-text').textContent=r.text;
-
-  const grid=document.getElementById('sd-grid');
-  grid.innerHTML=[
-    ['Author',r.author],['Date',r.date],
-    ['Rating','★'.repeat(r.rating)],
-    ['Risk Score',`<span style="color:${scoreColor(sc)};font-weight:700">${sc}</span>`],
-  ].map(([k,v])=>`<div class="sd-cell"><div class="sd-cell-label">${k}</div><div class="sd-cell-val">${v}</div></div>`).join('');
-
-  const simDiv=document.getElementById('sd-similar');
-  const sims=reviews.filter(x=>x.id!==r.id).map(x=>({r:x,s:similarity(r.text,x.text)})).filter(x=>x.s>0.4).sort((a,b)=>b.s-a.s);
-  if(!sims.length){simDiv.innerHTML='<div style="font-size:10px;color:var(--muted);">No highly similar reviews found.</div>';return;}
-  simDiv.innerHTML=sims.map(({r:sr,s})=>`
-    <div class="sim-card" onclick="selectReview(${sr.id})">
-      <div class="sim-top">
-        <span class="sim-id">#${sr.id} ${sr.author}</span>
-        <span class="sim-pct" style="color:${s>0.7?'var(--danger)':'var(--warn)'}">${(s*100).toFixed(0)}% match</span>
-      </div>
-      <div class="sim-text">${sr.text.slice(0,85)}...</div>
-    </div>`).join('');
-}
-
-// ---- REVIEWS LIST ----
-function renderReviews(){
-  const list=document.getElementById('reviews-list');
-  list.innerHTML=reviews.map(r=>{
-    const sc=fakeScore(r,reviews);
-    const color=scoreColor(sc);
-    const label=scoreLabel(sc);
-    return `<div class="review-card${selectedId===r.id?' selected':''}" data-id="${r.id}" onclick="selectReview(${r.id});showTab('tree')">
-      <div class="rc-top">
-        <div class="rc-left">
-          <span class="rc-id">#${r.id}</span>
-          <span class="rc-badge" style="color:${color};background:${color}18;border:1px solid ${color}40">${label}</span>
-          <span class="rc-author">${r.author}</span>
-        </div>
-        <div class="rc-right">
-          <span class="rc-date">${r.date}</span>
-          <div class="risk-bar-wrap"><div class="risk-bar" style="width:${sc}%;background:${color}"></div></div>
-          <span class="rc-score" style="color:${color}">${sc}</span>
-        </div>
-      </div>
-      <div class="rc-text">${r.text}</div>
-    </div>`;
-  }).join('');
-}
-
-function showTab(name){
-  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.tab===name));
-  document.querySelectorAll('.tab-panel').forEach(p=>p.classList.toggle('active',p.id==='tab-'+name));
-  if(name==='reviews')renderReviews();
-}
-
-// ---- ANALYZE ----
-document.getElementById('analyze-textarea').addEventListener('input',function(){
-  document.getElementById('analyze-btn').disabled=!this.value.trim();
-});
-document.getElementById('analyze-btn').disabled=true;
-
-async function runAnalysis(){
-  const text=document.getElementById('analyze-textarea').value.trim();
-  if(!text)return;
-  document.getElementById('analyze-btn').disabled=true;
-  document.getElementById('analyze-loading').classList.add('show');
-  document.getElementById('analyze-result').classList.remove('show');
-  try{
-    const resp=await fetch('https://api.anthropic.com/v1/messages',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({
-        model:'claude-sonnet-4-20250514',
-        max_tokens:1000,
-        messages:[{role:'user',content:`Analyze this product review for signs of being fake or inauthentic. Respond ONLY with valid JSON, no markdown, no extra text:\n{\n  "fakeScore": <0-100 integer>,\n  "verdict": "<Authentic | Suspicious | Likely Fake>",\n  "signals": ["<signal 1>","<signal 2>","<signal 3>"],\n  "reasoning": "<2-3 sentence explanation>"\n}\n\nReview: "${text}"`}]
-      })
-    });
-    const data=await resp.json();
-    const raw=(data.content||[]).map(b=>b.text||'').join('');
-    const clean=raw.replace(/```json|```/g,'').trim();
-    const result=JSON.parse(clean);
-    showResult(result);
-  }catch(e){
-    showResult({fakeScore:0,verdict:'Error',signals:['Analysis failed'],reasoning:'Could not connect to AI. Please try again.'});
-  }
-  document.getElementById('analyze-loading').classList.remove('show');
-  document.getElementById('analyze-btn').disabled=false;
-}
-
-function showResult(r){
-  const color=r.fakeScore>60?'var(--danger)':r.fakeScore>30?'var(--warn)':'var(--safe)';
-  document.getElementById('result-score').textContent=r.fakeScore;
-  document.getElementById('result-score').style.color=color;
-  document.getElementById('result-verdict').textContent=(r.verdict||'').toUpperCase();
-  document.getElementById('result-verdict').style.color=color;
-  document.getElementById('result-card').style.borderColor=color.replace('var(','').replace(')','');
-  document.getElementById('result-card').style.border=`1px solid ${color}`;
-  const arc=document.getElementById('gauge-arc');
-  arc.setAttribute('stroke',color);
-  arc.setAttribute('stroke-dasharray',`${r.fakeScore*2.01} 201`);
-  document.getElementById('result-signals').innerHTML=(r.signals||[]).map(s=>`<span class="signal-tag">⚠ ${s}</span>`).join('');
-  document.getElementById('result-reasoning').textContent=r.reasoning||'';
-  document.getElementById('analyze-result').classList.add('show');
-}
-
-function sendToAnalyze(){
-  const r=reviews.find(x=>x.id===selectedId);
-  if(!r)return;
-  document.getElementById('analyze-textarea').value=r.text;
-  document.getElementById('analyze-btn').disabled=false;
-  showTab('analyze');
-}
-
-// ---- INIT ----
-updateStats();
-renderTree();
 </script>
+
 </body>
 </html>
