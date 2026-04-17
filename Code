@@ -1,0 +1,907 @@
+// ===================== DATA =====================
+const SAMPLE_REVIEWS = [
+  {id:1,text:"Amazing product! Best purchase ever. Highly recommend to everyone!",author:"user_a1",date:"2024-01-15",rating:5,ip:"185.220.101.45"},
+  {id:2,text:"Amazing product! Best purchase I made. Highly recommend for everyone!",author:"user_b2",date:"2024-01-15",rating:5,ip:"185.220.101.45"},
+  {id:3,text:"Amazing! Best purchase ever. Highly recommend this to all!",author:"user_c3",date:"2024-01-16",rating:5,ip:"185.220.101.47"},
+  {id:4,text:"Terrible quality, broke after one day. Very disappointed with this.",author:"user_d4",date:"2024-01-10",rating:1,ip:"203.0.113.10"},
+  {id:5,text:"Great value for money. Works as described. Fast shipping too!",author:"user_e5",date:"2024-01-12",rating:4,ip:"198.51.100.22"},
+  {id:6,text:"Amazing product! Greatest purchase ever. Highly recommend to all people!",author:"user_f6",date:"2024-01-16",rating:5,ip:"185.220.101.46"},
+  {id:7,text:"Excellent item. Very satisfied with my order. Will buy again soon.",author:"user_g7",date:"2024-01-20",rating:5,ip:"45.142.212.100"},
+  {id:8,text:"Excellent item! Very satisfied with order. Will definitely buy again!",author:"user_h8",date:"2024-01-20",rating:5,ip:"45.142.212.101"},
+  {id:9,text:"Not worth the price. Quality is poor. Wouldn't recommend to anyone.",author:"user_i9",date:"2024-01-11",rating:2,ip:"203.0.113.15"},
+  {id:10,text:"Exceeded all my expectations! Fast delivery and great packaging overall.",author:"user_j10",date:"2024-01-18",rating:5,ip:"198.51.100.99"},
+  {id:11,text:"Excellent item. Very satisfied with my purchase. Will buy again!",author:"user_k11",date:"2024-01-21",rating:5,ip:"45.142.212.102"},
+  {id:12,text:"Good product. Meets expectations. Decent quality for the price.",author:"user_l12",date:"2024-01-14",rating:3,ip:"198.51.100.50"},
+];
+
+const IP_GEO = {
+  "185.220.101.45":{country:"Russia",city:"Moscow",risk:92,isp:"TorGuard VPN",type:"VPN/Proxy"},
+  "185.220.101.46":{country:"Russia",city:"Moscow",risk:88,isp:"TorGuard VPN",type:"VPN/Proxy"},
+  "185.220.101.47":{country:"Russia",city:"St. Petersburg",risk:90,isp:"TorGuard VPN",type:"VPN/Proxy"},
+  "45.142.212.100":{country:"Netherlands",city:"Amsterdam",risk:75,isp:"DataCenter Pro",type:"Datacenter"},
+  "45.142.212.101":{country:"Netherlands",city:"Amsterdam",risk:73,isp:"DataCenter Pro",type:"Datacenter"},
+  "45.142.212.102":{country:"Netherlands",city:"Amsterdam",risk:71,isp:"DataCenter Pro",type:"Datacenter"},
+  "203.0.113.10":{country:"China",city:"Shanghai",risk:45,isp:"China Telecom",type:"Residential"},
+  "203.0.113.15":{country:"China",city:"Beijing",risk:40,isp:"China Unicom",type:"Residential"},
+  "198.51.100.22":{country:"USA",city:"New York",risk:12,isp:"Comcast",type:"Residential"},
+  "198.51.100.99":{country:"USA",city:"Chicago",risk:8,isp:"AT&T",type:"Residential"},
+  "198.51.100.50":{country:"USA",city:"Seattle",risk:5,isp:"Comcast",type:"Residential"},
+};
+
+let reviews = SAMPLE_REVIEWS.map(r=>({...r,blocked:false,flagged:false}));
+let blockedIPs = new Set();
+let blockLog = [];
+let timelineFeed = [];
+let selectedId = null;
+let currentFilter = 'all';
+let modalCallback = null;
+
+// ===================== UTILS =====================
+function levenshtein(a,b){
+  const m=a.length,n=b.length;
+  const dp=Array.from({length:m+1},(_,i)=>Array.from({length:n+1},(_,j)=>i===0?j:j===0?i:0));
+  for(let i=1;i<=m;i++) for(let j=1;j<=n;j++) dp[i][j]=a[i-1]===b[j-1]?dp[i-1][j-1]:1+Math.min(dp[i-1][j],dp[i][j-1],dp[i-1][j-1]);
+  return dp[m][n];
+}
+function similarity(a,b){const d=levenshtein(a.toLowerCase(),b.toLowerCase());return 1-d/Math.max(a.length,b.length);}
+
+function fakeScore(r,all){
+  let s=0;
+  const sims=all.filter(x=>x.id!==r.id).map(x=>similarity(r.text,x.text));
+  const max=Math.max(...sims,0);
+  const high=sims.filter(x=>x>0.55).length;
+  if(max>0.75)s+=45;else if(max>0.55)s+=28;
+  if(high>2)s+=18;
+  if(r.rating===5||r.rating===1)s+=8;
+  if(r.text.split(' ').length<12)s+=9;
+  const geo=IP_GEO[r.ip];
+  if(geo){if(geo.risk>80)s+=15;else if(geo.risk>50)s+=8;}
+  if(blockedIPs.has(r.ip))s+=20;
+  return Math.min(s,100);
+}
+
+function scoreColor(s){return s>60?'var(--red)':s>35?'var(--orange)':'var(--green)';}
+function scoreLabel(s){return s>60?'FAKE':s>35?'SUSPECT':'AUTHENTIC';}
+function scoreClass(s){return s>60?'fake':s>35?'suspect':'clean';}
+
+// ===================== AUTO-SHIELD ENGINE =====================
+const AUTO_BLOCK_THRESHOLD = 60;
+let autoShieldEnabled = true;
+let autoBlockedCount = 0;
+
+function autoShieldScan(showToasts=true){
+  if(!autoShieldEnabled) return;
+  let newlyBlocked = 0;
+  reviews.forEach(r => {
+    if(r.blocked) return; // already handled
+    const sc = fakeScore(r, reviews);
+    if(sc > AUTO_BLOCK_THRESHOLD){
+      r.blocked = true;
+      newlyBlocked++;
+      autoBlockedCount++;
+      // Block the IP silently (no modal, no confirmation)
+      if(!blockedIPs.has(r.ip)){
+        blockedIPs.add(r.ip);
+        // Block all reviews from same IP
+        reviews.forEach(x => { if(x.ip === r.ip) x.blocked = true; });
+        const entry = {ip: r.ip, reason: `Auto-Shield: Fake score ${sc}/100`, time: timeNow()};
+        blockLog.unshift(entry);
+        addTimelineEvent(`🛡 AUTO-SHIELD blocked IP — fake score ${sc}`, r.ip, 'danger');
+        if(showToasts) toast(`🛡 Auto-Shield: Blocked IP ${r.ip} (score: ${sc})`, 'error', 4000);
+      } else {
+        addTimelineEvent(`🛡 AUTO-SHIELD: Review #${r.id} suppressed (score ${sc})`, r.ip, 'danger');
+      }
+    }
+  });
+  if(newlyBlocked > 0){
+    updateStats();
+    renderAll();
+  }
+  return newlyBlocked;
+}
+
+function toggleAutoShield(){
+  autoShieldEnabled = !autoShieldEnabled;
+  const el = document.getElementById('autoshield-status');
+  const btn = document.getElementById('autoshield-toggle-btn');
+  if(autoShieldEnabled){
+    el.style.color = 'var(--orange)';
+    el.innerHTML = '<div class="status-dot" style="background:var(--orange);box-shadow:0 0 8px rgba(255,149,0,.6);animation:blink 2s infinite"></div>AUTO-SHIELD: ON';
+    if(btn) { btn.textContent = '🛡 AUTO-SHIELD ON'; btn.style.color='var(--orange)'; btn.style.borderColor='rgba(255,149,0,.4)'; }
+    toast('🛡 Auto-Shield ENABLED — fake reviews will be blocked automatically', 'success', 4000);
+    autoShieldScan();
+  } else {
+    el.style.color = 'var(--muted)';
+    el.innerHTML = '<div class="status-dot" style="background:var(--muted);animation:none"></div>AUTO-SHIELD: OFF';
+    if(btn) { btn.textContent = '🛡 AUTO-SHIELD OFF'; btn.style.color='var(--muted)'; btn.style.borderColor='var(--border2)'; }
+    toast('⚠ Auto-Shield DISABLED — manual review required', 'info', 4000);
+  }
+}
+
+// Intercept reviews array push to auto-scan new entries
+const _origPush = Array.prototype.push;
+reviews.push = function(...args){
+  const result = _origPush.apply(this, args);
+  // Small delay to allow fakeScore to evaluate with full review set
+  setTimeout(() => autoShieldScan(true), 100);
+  return result;
+};
+
+function timeNow(){return new Date().toLocaleTimeString('en-US',{hour12:false});}
+function randomIP(){const o=()=>Math.floor(Math.random()*255);return `${o()}.${o()}.${o()}.${o()}`;}
+
+// ===================== CLOCK =====================
+setInterval(()=>{document.getElementById('live-clock').textContent=new Date().toLocaleTimeString('en-US',{hour12:false});},1000);
+
+// ===================== TOAST =====================
+function toast(msg,type='info',dur=3000){
+  const t=document.createElement('div');
+  t.className=`toast ${type}`;
+  t.innerHTML=`<span>${type==='success'?'✓':type==='error'?'✗':'ℹ'}</span>${msg}`;
+  document.getElementById('toast-container').appendChild(t);
+  setTimeout(()=>{t.style.opacity='0';t.style.transition='opacity .3s';setTimeout(()=>t.remove(),300);},dur);
+}
+
+// ===================== MODAL =====================
+function showModal(title,body,cb){
+  document.getElementById('modal-title').innerHTML=title;
+  document.getElementById('modal-body').innerHTML=body;
+  modalCallback=cb;
+  document.getElementById('modal-overlay').classList.add('show');
+}
+function closeModal(){document.getElementById('modal-overlay').classList.remove('show');modalCallback=null;}
+document.getElementById('modal-confirm').onclick=()=>{if(modalCallback)modalCallback();closeModal();};
+
+// ===================== TIMELINE =====================
+function addTimelineEvent(msg,ip,type='info'){
+  const colors={info:'var(--cyan)',warning:'var(--orange)',danger:'var(--red)',success:'var(--green)'};
+  const item={msg,ip,type,time:timeNow()};
+  timelineFeed.unshift(item);
+  if(timelineFeed.length>50)timelineFeed.pop();
+  const feed=document.getElementById('timeline-feed');
+  if(feed){
+    const el=document.createElement('div');
+    el.className='tl-item fade-in';
+    el.innerHTML=`<div class="tl-dot" style="background:${colors[type]||colors.info}"></div>
+      <div class="tl-time">${item.time}</div>
+      <div><div class="tl-msg">${msg}</div>${ip?`<div class="tl-ip">${ip}</div>`:''}</div>`;
+    feed.insertBefore(el,feed.firstChild);
+    if(feed.children.length>30)feed.lastChild.remove();
+  }
+}
+function clearTimeline(){document.getElementById('timeline-feed').innerHTML='';timelineFeed=[];}
+
+// ===================== HEADER STATS =====================
+function updateStats(){
+  const fake=reviews.filter(r=>fakeScore(r,reviews)>60).length;
+  const blocked=reviews.filter(r=>r.blocked).length;
+  document.getElementById('h-total').textContent=reviews.length;
+  document.getElementById('h-fake').textContent=fake;
+  document.getElementById('h-blocked').textContent=blocked;
+  document.getElementById('h-ips').textContent=blockedIPs.size;
+  document.getElementById('ip-count-badge').textContent=blockedIPs.size;
+}
+
+// ===================== BLOCK IP =====================
+function blockIP(ip,reason,silent=false){
+  if(blockedIPs.has(ip)){toast(`IP ${ip} already blocked`,'info');return;}
+  blockedIPs.add(ip);
+  reviews.forEach(r=>{if(r.ip===ip)r.blocked=true;});
+  const entry={ip,reason,time:timeNow()};
+  blockLog.unshift(entry);
+  if(!silent){
+    toast(`🚫 Blocked IP: ${ip}`,'error',4000);
+    addTimelineEvent(`IP blocked: ${reason||'Manual block'}`,ip,'danger');
+  }
+  updateStats();
+  renderAll();
+}
+
+function unblockIP(ip){
+  blockedIPs.delete(ip);
+  reviews.forEach(r=>{if(r.ip===ip)r.blocked=false;});
+  blockLog=blockLog.filter(e=>e.ip!==ip);
+  toast(`✓ Unblocked IP: ${ip}`,'success');
+  addTimelineEvent(`IP unblocked`,ip,'success');
+  updateStats();
+  renderAll();
+}
+
+function manualBlockIP(){
+  const ip=document.getElementById('manual-ip-input').value.trim();
+  if(!ip){toast('Enter a valid IP address','error');return;}
+  showModal('🚫 BLOCK IP ADDRESS',`Block <b style="color:var(--cyan)">${ip}</b> from submitting reviews?<br><br>All existing reviews from this IP will be flagged as blocked.`,()=>{
+    blockIP(ip,'Manual block');
+    document.getElementById('manual-ip-input').value='';
+  });
+}
+
+function blockAllFake(){
+  const fakes=reviews.filter(r=>fakeScore(r,reviews)>60&&!r.blocked);
+  if(!fakes.length){toast('No new fake reviews to block','info');return;}
+  showModal('🚨 BLOCK ALL FAKE REVIEWS',`Auto-block <b style="color:var(--red)">${fakes.length} fake reviews</b> and their associated IPs?<br><br>This will block reviews from <b>${new Set(fakes.map(r=>r.ip)).size}</b> unique IP addresses.`,()=>{
+    const ips=new Set(fakes.map(r=>r.ip));
+    ips.forEach(ip=>blockIP(ip,'Auto-blocked: High fake score',true));
+    fakes.forEach(r=>r.blocked=true);
+    toast(`🚫 Blocked ${fakes.length} fake reviews from ${ips.size} IPs`,'error',5000);
+    addTimelineEvent(`Mass block: ${fakes.length} fake reviews blocked`,`${ips.size} IPs`,'danger');
+    updateStats();renderAll();
+  });
+}
+
+function blockAllSuspiciousIPs(){
+  const suspicious=Object.entries(IP_GEO).filter(([ip,[,v]])=>v&&v.risk>70).map(([ip])=>ip);
+  const toBlock=suspicious.filter(ip=>!blockedIPs.has(ip));
+  if(!toBlock.length){toast('No new suspicious IPs found','info');return;}
+  showModal('🚨 BLOCK SUSPICIOUS IPs',`Block <b style="color:var(--orange)">${toBlock.length} high-risk IPs</b>?<br><br>These IPs have risk scores above 70 (VPN, datacenter, or known bot networks).`,()=>{
+    toBlock.forEach(ip=>blockIP(ip,'Auto-blocked: High IP risk score',true));
+    toast(`🚫 Blocked ${toBlock.length} suspicious IPs`,'error',4000);
+  });
+}
+
+// ===================== PHYLO TREE =====================
+function buildClusters(){
+  const n=reviews.length;
+  const parent=reviews.map((_,i)=>i);
+  function find(x){return parent[x]===x?x:(parent[x]=find(parent[x]));}
+  for(let i=0;i<n;i++) for(let j=i+1;j<n;j++)
+    if(similarity(reviews[i].text,reviews[j].text)>0.48){const ci=find(i),cj=find(j);if(ci!==cj)parent[ci]=cj;}
+  const map={};
+  reviews.forEach((r,i)=>{const root=find(i);if(!map[root])map[root]=[];map[root].push(i);});
+  return Object.values(map);
+}
+
+function renderTree(){
+  const svg=document.getElementById('tree-svg');
+  const W=800,H=400;
+  svg.innerHTML='';
+  const clusters=buildClusters();
+  const fakeClusters=clusters.filter(c=>c.length>1&&c.some(i=>fakeScore(reviews[i],reviews)>60));
+
+  document.getElementById('node-count').textContent=reviews.length;
+  document.getElementById('cluster-count').textContent=fakeClusters.length;
+
+  if(fakeClusters.length>0){
+    const ab=document.getElementById('alert-banner');
+    ab.style.display='flex';
+    document.getElementById('alert-text').textContent=`⚠ ${fakeClusters.length} COORDINATED FAKE CAMPAIGN${fakeClusters.length>1?'S':''} DETECTED`;
+    document.getElementById('alert-sub').textContent=`${fakeClusters.reduce((a,c)=>a+c.length,0)} reviews linked across ${new Set(fakeClusters.flat().map(i=>reviews[i].ip)).size} IP addresses`;
+  }
+
+  svg.innerHTML=`<defs>
+    <filter id="glow"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <filter id="softglow"><feGaussianBlur stdDeviation="5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <radialGradient id="gFake"><stop offset="0%" stop-color="#ff2d55" stop-opacity=".95"/><stop offset="100%" stop-color="#6b0020"/></radialGradient>
+    <radialGradient id="gSafe"><stop offset="0%" stop-color="#00ff9d" stop-opacity=".9"/><stop offset="100%" stop-color="#003d22"/></radialGradient>
+    <radialGradient id="gWarn"><stop offset="0%" stop-color="#ff9500" stop-opacity=".9"/><stop offset="100%" stop-color="#4a2c00"/></radialGradient>
+    <radialGradient id="gBlocked"><stop offset="0%" stop-color="#4a6080" stop-opacity=".9"/><stop offset="100%" stop-color="#1a2030"/></radialGradient>
+  </defs>`;
+
+  const pos={};
+  const R=15;
+  clusters.forEach((cluster,ci)=>{
+    const cx=70+(ci/Math.max(clusters.length-1,1))*(W-140);
+    cluster.forEach((idx,ni)=>{
+      const r=reviews[idx];
+      const spread=cluster.length>1?(ni/(cluster.length-1)-.5)*180:0;
+      const row=Math.floor(ni/2);
+      pos[r.id]={x:cx+spread*.6,y:90+ni%2*110+row*30};
+    });
+  });
+
+  // cluster halos
+  clusters.forEach(cluster=>{
+    if(cluster.length<2)return;
+    const hasFake=cluster.some(i=>fakeScore(reviews[i],reviews)>60);
+    if(!hasFake)return;
+    const xs=cluster.map(i=>pos[reviews[i].id].x);
+    const ys=cluster.map(i=>pos[reviews[i].id].y);
+    const mx=(Math.min(...xs)+Math.max(...xs))/2;
+    const my=(Math.min(...ys)+Math.max(...ys))/2;
+    const rx=Math.max(Math.max(...xs)-Math.min(...xs),40)+36;
+    const ry=Math.max(Math.max(...ys)-Math.min(...ys),40)+28;
+    const el=document.createElementNS('http://www.w3.org/2000/svg','ellipse');
+    el.setAttribute('cx',mx);el.setAttribute('cy',my);
+    el.setAttribute('rx',rx);el.setAttribute('ry',ry);
+    el.setAttribute('fill','rgba(255,45,85,.04)');
+    el.setAttribute('stroke','rgba(255,45,85,.2)');
+    el.setAttribute('stroke-width','1');
+    el.setAttribute('stroke-dasharray','5 4');
+    svg.appendChild(el);
+  });
+
+  // edges
+  for(let i=0;i<reviews.length;i++) for(let j=i+1;j<reviews.length;j++){
+    const s=similarity(reviews[i].text,reviews[j].text);
+    if(s<0.52)continue;
+    const p1=pos[reviews[i].id],p2=pos[reviews[j].id];
+    const line=document.createElementNS('http://www.w3.org/2000/svg','line');
+    line.setAttribute('x1',p1.x);line.setAttribute('y1',p1.y);
+    line.setAttribute('x2',p2.x);line.setAttribute('y2',p2.y);
+    line.setAttribute('stroke','#ff2d55');
+    line.setAttribute('stroke-width',(s-.5)*6);
+    line.setAttribute('stroke-opacity',(s-.52)/.48*.5);
+    svg.appendChild(line);
+  }
+
+  // nodes
+  reviews.forEach(r=>{
+    const p=pos[r.id];if(!p)return;
+    const sc=fakeScore(r,reviews);
+    const isBlocked=r.blocked;
+    const fill=isBlocked?'url(#gBlocked)':sc>60?'url(#gFake)':sc>35?'url(#gWarn)':'url(#gSafe)';
+    const isSel=selectedId===r.id;
+    const g=document.createElementNS('http://www.w3.org/2000/svg','g');
+    g.style.cursor='pointer';
+    g.addEventListener('click',()=>selectReview(r.id));
+
+    if(isSel){
+      const ring=document.createElementNS('http://www.w3.org/2000/svg','circle');
+      ring.setAttribute('cx',p.x);ring.setAttribute('cy',p.y);ring.setAttribute('r',R+9);
+      ring.setAttribute('fill','none');ring.setAttribute('stroke','#00f5ff');
+      ring.setAttribute('stroke-width','1.5');ring.setAttribute('filter','url(#glow)');ring.setAttribute('opacity','.9');
+      g.appendChild(ring);
+    }
+    const c=document.createElementNS('http://www.w3.org/2000/svg','circle');
+    c.setAttribute('cx',p.x);c.setAttribute('cy',p.y);c.setAttribute('r',R);
+    c.setAttribute('fill',fill);
+    if(sc>60&&!isBlocked)c.setAttribute('filter','url(#glow)');
+    if(isSel)c.setAttribute('stroke','#00f5ff'),c.setAttribute('stroke-width','2');
+    g.appendChild(c);
+
+    if(isBlocked){
+      const line1=document.createElementNS('http://www.w3.org/2000/svg','line');
+      line1.setAttribute('x1',p.x-8);line1.setAttribute('y1',p.y-8);
+      line1.setAttribute('x2',p.x+8);line1.setAttribute('y2',p.y+8);
+      line1.setAttribute('stroke','#ff2d55');line1.setAttribute('stroke-width','2');
+      const line2=document.createElementNS('http://www.w3.org/2000/svg','line');
+      line2.setAttribute('x1',p.x+8);line2.setAttribute('y1',p.y-8);
+      line2.setAttribute('x2',p.x-8);line2.setAttribute('y2',p.y+8);
+      line2.setAttribute('stroke','#ff2d55');line2.setAttribute('stroke-width','2');
+      g.appendChild(line1);g.appendChild(line2);
+    } else {
+      const t=document.createElementNS('http://www.w3.org/2000/svg','text');
+      t.setAttribute('x',p.x);t.setAttribute('y',p.y+5);
+      t.setAttribute('text-anchor','middle');t.setAttribute('font-size','10');
+      t.setAttribute('fill','white');t.setAttribute('font-weight','700');
+      t.style.pointerEvents='none';
+      t.textContent=r.id;
+      g.appendChild(t);
+    }
+    svg.appendChild(g);
+  });
+
+  // legend
+  [['#ff2d55','Fake/High Risk'],['#ff9500','Suspect'],['#00ff9d','Authentic'],['#4a6080','Blocked']].forEach(([color,label],i)=>{
+    const g=document.createElementNS('http://www.w3.org/2000/svg','g');
+    g.setAttribute('transform',`translate(${16+i*130},${H-26})`);
+    const c=document.createElementNS('http://www.w3.org/2000/svg','circle');
+    c.setAttribute('cx','7');c.setAttribute('cy','7');c.setAttribute('r','6');c.setAttribute('fill',color);c.setAttribute('opacity','.85');
+    const t=document.createElementNS('http://www.w3.org/2000/svg','text');
+    t.setAttribute('x','18');t.setAttribute('y','12');t.setAttribute('font-size','10');
+    t.setAttribute('fill','#4a6080');t.setAttribute('font-family','Rajdhani,sans-serif');
+    t.textContent=label;
+    g.appendChild(c);g.appendChild(t);
+    svg.appendChild(g);
+  });
+}
+
+// ===================== SELECT REVIEW =====================
+function selectReview(id){
+  selectedId=id;
+  renderTree();
+  renderRightPanel();
+}
+
+function renderRightPanel(){
+  const r=reviews.find(x=>x.id===selectedId);
+  const container=document.getElementById('rp-review-detail');
+  if(!r){container.innerHTML='<div class="empty-state"><div class="empty-icon">🔍</div><div class="empty-label">SELECT A NODE</div></div>';return;}
+  const sc=fakeScore(r,reviews);
+  const color=scoreColor(sc);
+  const geo=IP_GEO[r.ip]||{country:'Unknown',city:'Unknown',risk:50,isp:'Unknown',type:'Unknown'};
+  const sims=reviews.filter(x=>x.id!==r.id).map(x=>({r:x,s:similarity(r.text,x.text)})).filter(x=>x.s>0.45).sort((a,b)=>b.s-a.s).slice(0,3);
+
+  container.innerHTML=`<div style="background:var(--panel);border:1px solid ${color}40;border-radius:8px;padding:12px;margin-bottom:10px;">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+      <span style="font-family:'Orbitron',monospace;font-size:24px;font-weight:700;color:${color}">${sc}</span>
+      <div><div style="font-size:11px;font-weight:700;color:${color}">${scoreLabel(sc)}</div><div style="font-size:9px;color:var(--muted)">RISK SCORE</div></div>
+      ${r.blocked?'<span style="margin-left:auto;font-size:9px;background:rgba(255,45,85,.15);border:1px solid rgba(255,45,85,.4);color:var(--red);padding:2px 7px;border-radius:3px">BLOCKED</span>':''}
+    </div>
+    <div style="font-size:11px;color:var(--text);line-height:1.55;margin-bottom:8px;">${r.text}</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;font-size:9px;color:var(--muted);">
+      <div>👤 ${r.author}</div><div>📅 ${r.date}</div>
+      <div>⭐ ${'★'.repeat(r.rating)}</div>
+      <div style="color:var(--cyan);font-family:'JetBrains Mono',monospace">🌐 ${r.ip}</div>
+      <div>📍 ${geo.country}</div><div>⚠ Risk: ${geo.risk}%</div>
+    </div>
+    <div style="display:flex;gap:5px;margin-top:8px;">
+      ${r.blocked
+        ?`<button onclick="unblockIP('${r.ip}')" style="flex:1;padding:5px;border-radius:4px;cursor:pointer;font-size:9px;background:rgba(0,255,157,.08);border:1px solid rgba(0,255,157,.3);color:var(--green);font-family:'Rajdhani',sans-serif;font-weight:600">✓ UNBLOCK IP</button>`
+        :`<button onclick="blockIP('${r.ip}','Manual from review panel')" style="flex:1;padding:5px;border-radius:4px;cursor:pointer;font-size:9px;background:rgba(255,45,85,.08);border:1px solid rgba(255,45,85,.3);color:var(--red);font-family:'Rajdhani',sans-serif;font-weight:600">🚫 BLOCK IP</button>`
+      }
+      <button onclick="sendToAnalyze(${r.id})" style="flex:1;padding:5px;border-radius:4px;cursor:pointer;font-size:9px;background:rgba(0,245,255,.06);border:1px solid rgba(0,245,255,.2);color:var(--cyan);font-family:'Rajdhani',sans-serif;font-weight:600">🔬 ANALYZE</button>
+    </div>
+  </div>
+  ${sims.length>0?`<div style="font-size:9px;color:var(--muted);letter-spacing:.12em;margin-bottom:7px">SIMILAR REVIEWS</div>${sims.map(({r:sr,s})=>`<div onclick="selectReview(${sr.id})" style="background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:8px 10px;margin-bottom:5px;cursor:pointer;font-size:10px;transition:background .15s;" onmouseover="this.style.background='var(--panel2)'" onmouseout="this.style.background='var(--panel)'">
+    <div style="display:flex;justify-content:space-between;margin-bottom:3px"><span style="color:var(--muted)">#${sr.id}</span><span style="color:${s>0.7?'var(--red)':'var(--orange)'};font-weight:700">${(s*100).toFixed(0)}% match</span></div>
+    <div style="color:var(--text)">${sr.text.slice(0,70)}...</div></div>`).join('')}`:''}`;
+
+  // Top threats
+  const threats=reviews.filter(r=>fakeScore(r,reviews)>60).slice(0,5);
+  document.getElementById('rp-threats').innerHTML=threats.length?threats.map(r=>{
+    const sc=fakeScore(r,reviews);
+    return `<div style="display:flex;align-items:center;gap:7px;padding:5px 0;border-bottom:1px solid var(--border);cursor:pointer" onclick="selectReview(${r.id})">
+      <div style="width:6px;height:6px;border-radius:50%;background:var(--red);flex-shrink:0"></div>
+      <div style="flex:1;font-size:10px;color:var(--text)">${r.text.slice(0,40)}...</div>
+      <span style="font-family:'Orbitron',monospace;font-size:9px;color:var(--red)">${sc}</span>
+    </div>`;}).join(''):'<div style="font-size:10px;color:var(--muted)">No threats detected</div>';
+
+  // Blocked IPs
+  document.getElementById('rp-blocked-ips').innerHTML=blockedIPs.size?[...blockedIPs].slice(0,5).map(ip=>`
+    <div style="display:flex;align-items:center;gap:6px;padding:4px 0;border-bottom:1px solid var(--border);">
+      <div style="width:5px;height:5px;border-radius:50%;background:var(--red)"></div>
+      <span style="font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--cyan);flex:1">${ip}</span>
+      <button onclick="unblockIP('${ip}')" style="font-size:8px;background:none;border:1px solid rgba(0,255,157,.3);color:var(--green);padding:1px 6px;border-radius:3px;cursor:pointer">UNBLK</button>
+    </div>`).join(''):'<div style="font-size:10px;color:var(--muted)">No IPs blocked</div>';
+}
+
+// ===================== REVIEWS PANEL =====================
+function filterReviews(f){
+  currentFilter=f;
+  ['all','fake','clean','blocked'].forEach(x=>{
+    const btn=document.getElementById('f-'+x);
+    if(btn){btn.style.borderColor=x===f?'var(--cyan)':'';btn.style.color=x===f?'var(--cyan)':'';}
+  });
+  renderReviews();
+}
+
+function renderReviews(){
+  const list=document.getElementById('reviews-list');
+  let filtered=reviews;
+  if(currentFilter==='fake')filtered=reviews.filter(r=>fakeScore(r,reviews)>60);
+  else if(currentFilter==='clean')filtered=reviews.filter(r=>fakeScore(r,reviews)<=35);
+  else if(currentFilter==='blocked')filtered=reviews.filter(r=>r.blocked);
+
+  list.innerHTML=filtered.map(r=>{
+    const sc=fakeScore(r,reviews);
+    const color=scoreColor(sc);
+    const cls=scoreClass(sc);
+    const geo=IP_GEO[r.ip]||{country:'Unknown',risk:0,type:'Unknown'};
+    return `<div class="rev-card ${cls}${r.blocked?' blocked':''}" data-id="${r.id}" onclick="selectReview(${r.id})" style="${r.blocked?'border-color:rgba(255,45,85,.3)':''}">
+      <div class="rev-top">
+        <span class="rev-id">#${r.id}</span>
+        <span class="rev-status-badge" style="color:${color};background:${color}18;border:1px solid ${color}40">${r.blocked?'BLOCKED':scoreLabel(sc)}</span>
+        <span class="rev-author">${r.author}</span>
+        <span class="rev-ip">${r.ip}</span>
+        <span style="font-size:9px;color:var(--muted)">📍${geo.country}</span>
+        <div class="rev-score-wrap" style="margin-left:auto">
+          <div class="rev-score-bar"><div class="rev-score-fill" style="width:${sc}%;background:${color}"></div></div>
+          <span class="rev-score-num" style="color:${color}">${sc}</span>
+        </div>
+      </div>
+      <div class="rev-text">${r.text}</div>
+      <div style="display:flex;gap:6px;margin-top:8px;">
+        ${r.blocked
+          ?`<button onclick="event.stopPropagation();unblockIP('${r.ip}')" class="tt-btn" style="color:var(--green);border-color:rgba(0,255,157,.3)">✓ UNBLOCK IP</button>`
+          :`<button onclick="event.stopPropagation();blockIP('${r.ip}','Blocked from review list')" class="tt-btn danger">🚫 BLOCK IP</button>`
+        }
+        <button onclick="event.stopPropagation();sendToAnalyze(${r.id})" class="tt-btn">🔬 ANALYZE</button>
+        <span style="margin-left:auto;font-size:9px;color:var(--muted)">${r.date} · ⭐${'★'.repeat(r.rating)}</span>
+      </div>
+      ${r.blocked?`<div class="rev-blocked-overlay"><div class="rev-blocked-label">🚫 REVIEW BLOCKED</div></div>`:''}
+    </div>`;
+  }).join('');
+}
+
+// ===================== IP GRID =====================
+function renderIPGrid(){
+  const ipMap={};
+  reviews.forEach(r=>{
+    if(!ipMap[r.ip])ipMap[r.ip]={ip:r.ip,count:0,fakeCount:0,reviews:[]};
+    ipMap[r.ip].count++;
+    ipMap[r.ip].reviews.push(r.id);
+    if(fakeScore(r,reviews)>60)ipMap[r.ip].fakeCount++;
+  });
+  const ips=Object.values(ipMap).sort((a,b)=>b.fakeCount-a.fakeCount);
+
+  document.getElementById('ip-grid').innerHTML=ips.map(({ip,count,fakeCount})=>{
+    const geo=IP_GEO[ip]||{country:'Unknown',city:'Unknown',risk:50,isp:'Unknown',type:'Unknown'};
+    const isBlocked=blockedIPs.has(ip);
+    const risk=geo.risk;
+    const riskColor=risk>70?'var(--red)':risk>40?'var(--orange)':'var(--green)';
+    const badgeClass=isBlocked?'blocked':risk>70?'suspicious':'clean';
+    return `<div class="ip-card${isBlocked?' blocked':''}">
+      <div class="ip-card-header">
+        <span class="ip-addr" style="color:${isBlocked?'var(--muted)':'var(--cyan)'}">${ip}</span>
+        <span class="ip-badge ${badgeClass}">${isBlocked?'BLOCKED':risk>70?'HIGH RISK':'CLEAN'}</span>
+      </div>
+      <div class="ip-meta">
+        📍 ${geo.city}, ${geo.country}<br>
+        🏢 ${geo.isp} · ${geo.type}<br>
+        📝 ${count} review${count>1?'s':''} · 🚨 ${fakeCount} fake<br>
+        ⚠ Risk Score: <span style="color:${riskColor};font-weight:700">${risk}%</span>
+      </div>
+      <div class="ip-bar-wrap"><div class="ip-bar" style="width:${risk}%;background:${riskColor}"></div></div>
+      <div class="ip-actions">
+        ${isBlocked
+          ?`<button class="ip-action-btn unblock" onclick="unblockIP('${ip}')">✓ UNBLOCK</button>`
+          :`<button class="ip-action-btn block" onclick="blockIP('${ip}','Manual block from IP panel')">🚫 BLOCK</button>`
+        }
+        <button class="ip-action-btn" onclick="showIPDetails('${ip}')">ℹ DETAILS</button>
+      </div>
+    </div>`;
+  }).join('');
+
+  // Block log
+  const logRows=document.getElementById('block-log-rows');
+  document.getElementById('block-count').textContent=`${blockLog.length} events`;
+  logRows.innerHTML=blockLog.slice(0,10).map(e=>`
+    <div class="bl-row">
+      <span class="bl-ip">${e.ip}</span>
+      <span class="bl-reason">${e.reason}</span>
+      <span class="bl-time">${e.time}</span>
+      <button class="bl-action unblock" onclick="unblockIP('${e.ip}')">UNBLOCK</button>
+    </div>`).join('')||'<div style="padding:12px 14px;font-size:11px;color:var(--muted)">No blocking activity yet</div>';
+}
+
+function showIPDetails(ip){
+  const geo=IP_GEO[ip]||{country:'Unknown',city:'Unknown',risk:50,isp:'Unknown',type:'Unknown'};
+  const ipRevs=reviews.filter(r=>r.ip===ip);
+  const riskColor=geo.risk>70?'#ff2d55':geo.risk>40?'#ff9500':'#00ff9d';
+  showModal(`🌐 IP DETAILS: ${ip}`,
+    `<div style="font-family:'JetBrains Mono',monospace;font-size:11px;line-height:2;color:var(--text)">
+      <b style="color:var(--cyan)">Location:</b> ${geo.city}, ${geo.country}<br>
+      <b style="color:var(--cyan)">ISP:</b> ${geo.isp}<br>
+      <b style="color:var(--cyan)">Type:</b> ${geo.type}<br>
+      <b style="color:var(--cyan)">Risk Score:</b> <span style="color:${riskColor}">${geo.risk}%</span><br>
+      <b style="color:var(--cyan)">Reviews Posted:</b> ${ipRevs.length}<br>
+      <b style="color:var(--cyan)">Fake Reviews:</b> <span style="color:var(--red)">${ipRevs.filter(r=>fakeScore(r,reviews)>60).length}</span><br>
+      <b style="color:var(--cyan)">Status:</b> ${blockedIPs.has(ip)?'<span style="color:var(--red)">BLOCKED</span>':'<span style="color:var(--green)">ACTIVE</span>'}
+    </div>`,
+    ()=>{if(!blockedIPs.has(ip))blockIP(ip,'Blocked from IP details');}
+  );
+  document.getElementById('modal-confirm').textContent=blockedIPs.has(ip)?'CLOSE':'BLOCK IP';
+}
+
+// ===================== ANALYTICS =====================
+function renderAnalytics(){
+  const total=reviews.length;
+  const fake=reviews.filter(r=>fakeScore(r,reviews)>60).length;
+  const suspect=reviews.filter(r=>{const s=fakeScore(r,reviews);return s>35&&s<=60;}).length;
+  const blocked=reviews.filter(r=>r.blocked).length;
+  const accuracy=total>0?Math.round((1-(fake/total))*100):100;
+  const clusters=buildClusters().filter(c=>c.length>1&&c.some(i=>fakeScore(reviews[i],reviews)>60));
+
+  document.getElementById('analytics-metrics').innerHTML=[
+    {v:fake,l:'FAKE DETECTED',c:'c-red',delta:`${Math.round(fake/total*100)}% of total`},
+    {v:suspect,l:'SUSPICIOUS',c:'c-orange',delta:'Need review'},
+    {v:blocked,l:'BLOCKED',c:'c-red',delta:`${blockedIPs.size} IPs blocked`},
+    {v:accuracy+'%',l:'ACCURACY',c:'c-green',delta:'AI confidence'},
+    {v:clusters.length,l:'CAMPAIGNS',c:'c-purple',delta:'Coordinated attacks'},
+    {v:total-fake-suspect,l:'AUTHENTIC',c:'c-cyan',delta:'Verified genuine'},
+  ].map(({v,l,c,delta})=>`<div class="metric-card ${c}">
+    <div class="metric-val" style="color:${c.includes('red')?'var(--red)':c.includes('green')?'var(--green)':c.includes('orange')?'var(--orange)':c.includes('purple')?'var(--purple)':'var(--cyan)'}">${v}</div>
+    <div class="metric-lbl">${l}</div>
+    <div class="metric-delta" style="color:var(--muted)">${delta}</div>
+  </div>`).join('');
+
+  // Distribution chart
+  const buckets=[0,0,0,0,0]; // 0-20,20-40,40-60,60-80,80-100
+  reviews.forEach(r=>{const s=fakeScore(r,reviews);buckets[Math.min(Math.floor(s/20),4)]++;});
+  const maxB=Math.max(...buckets,1);
+  const bColors=['var(--green)','var(--green)','var(--orange)','var(--red)','var(--red)'];
+  document.getElementById('dist-chart').innerHTML=buckets.map((b,i)=>`
+    <div class="bar-col">
+      <div class="bar-fill" style="height:${(b/maxB)*64}px;background:${bColors[i]};width:100%"></div>
+      <div class="bar-lbl">${i*20}-${(i+1)*20}</div>
+    </div>`).join('');
+
+  // Heatmap
+  document.getElementById('heatmap').innerHTML=Array.from({length:24},(_,i)=>{
+    const intensity=Math.random();
+    const color=intensity>0.7?'var(--red)':intensity>0.4?'var(--orange)':'var(--border2)';
+    return `<div class="hm-cell" style="background:${color};opacity:${0.3+intensity*.7}" title="Hour ${i}:00 — ${Math.floor(intensity*10)} events"></div>`;
+  }).join('');
+
+  // IP origin
+  const ipCounts={};
+  reviews.forEach(r=>{const geo=IP_GEO[r.ip];if(geo){ipCounts[geo.country]=(ipCounts[geo.country]||0)+1;}});
+  const sorted=Object.entries(ipCounts).sort((a,b)=>b[1]-a[1]);
+  const maxC=Math.max(...sorted.map(([,v])=>v),1);
+  document.getElementById('ip-origin-chart').innerHTML=sorted.map(([country,count])=>{
+    const pct=Math.round(count/total*100);
+    const isHigh=sorted.findIndex(([c])=>c===country)<2;
+    return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:7px;">
+      <div style="min-width:90px;font-size:11px;color:var(--text)">${country}</div>
+      <div style="flex:1;height:14px;background:var(--border);border-radius:3px;overflow:hidden">
+        <div style="height:100%;width:${count/maxC*100}%;background:${isHigh?'var(--red)':'var(--cyan)'};border-radius:3px"></div>
+      </div>
+      <div style="min-width:45px;text-align:right;font-size:10px;color:${isHigh?'var(--red)':'var(--muted)'}">
+        ${count} (${pct}%)
+      </div>
+    </div>`;}).join('');
+
+  // Campaign summary
+  document.getElementById('campaign-summary').innerHTML=clusters.length?clusters.map((c,i)=>{
+    const ips=new Set(c.map(idx=>reviews[idx].ip));
+    const texts=c.map(idx=>reviews[idx]);
+    return `<div style="background:rgba(255,45,85,.06);border:1px solid rgba(255,45,85,.2);border-radius:6px;padding:10px 12px;margin-bottom:8px;">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+        <span style="font-family:'Orbitron',monospace;font-size:10px;color:var(--red)">CAMPAIGN #${i+1}</span>
+        <span style="font-size:9px;color:var(--muted)">${texts.length} reviews · ${ips.size} IPs</span>
+        <button onclick="blockCampaign([${c.map(idx=>'"'+reviews[idx].ip+'"').join(',')}])" class="tt-btn danger" style="margin-left:auto;padding:2px 8px">BLOCK CAMPAIGN</button>
+      </div>
+      <div style="font-size:10px;color:var(--text)">"${texts[0].text.slice(0,80)}..."</div>
+      <div style="font-size:9px;color:var(--muted);margin-top:4px">Similarity: ${(similarity(texts[0].text,texts[1]?.text||texts[0].text)*100).toFixed(0)}% · IPs: ${[...ips].join(', ')}</div>
+    </div>`;}).join(''):`<div style="font-size:11px;color:var(--muted);text-align:center;padding:20px">No campaigns detected</div>`;
+}
+
+function blockCampaign(ips){
+  showModal('🚨 BLOCK CAMPAIGN',`Block all IPs associated with this fake review campaign?<br><b style="color:var(--cyan)">${ips.length} IPs</b> will be blocked.`,()=>{
+    ips.forEach(ip=>blockIP(ip,'Campaign block',true));
+    toast(`🚫 Campaign blocked: ${ips.length} IPs`,'error',4000);
+  });
+}
+
+// ===================== AI ANALYZE =====================
+function sendToAnalyze(id){
+  const r=reviews.find(x=>x.id===id);
+  if(!r)return;
+  document.getElementById('analyze-text').value=r.text;
+  document.getElementById('analyze-ip').value=r.ip||'';
+  document.getElementById('analyze-user').value=r.author||'';
+  document.getElementById('analyze-rating').value=r.rating||5;
+  showPanel('analyze');
+}
+
+const LOADING_STAGES=['TOKENIZING REVIEW TEXT...','COMPUTING LEVENSHTEIN DISTANCE...','RUNNING PHYLOGENETIC CLUSTERING...','CHECKING IP REPUTATION...','ANALYZING BEHAVIORAL PATTERNS...','GENERATING THREAT ASSESSMENT...'];
+
+async function runDeepAnalysis(){
+  const text=document.getElementById('analyze-text').value.trim();
+  const ip=document.getElementById('analyze-ip').value.trim()||'Unknown';
+  const user=document.getElementById('analyze-user').value.trim()||'Anonymous';
+  const rating=document.getElementById('analyze-rating').value||5;
+  if(!text){toast('Enter review text to analyze','error');return;}
+
+  const btn=document.getElementById('analyze-btn');
+  btn.disabled=true;
+  document.getElementById('analyze-loading').style.display='block';
+  document.getElementById('analyze-result').style.display='none';
+
+  // Cycle loading stages
+  let stageIdx=0;
+  const stageInterval=setInterval(()=>{
+    document.getElementById('loading-stage').textContent=LOADING_STAGES[stageIdx%LOADING_STAGES.length];
+    stageIdx++;
+  },700);
+
+  // Local scoring
+  const tempReview={id:99999,text,author:user,rating:parseInt(rating),ip,date:new Date().toISOString().split('T')[0]};
+  const localScore=fakeScore(tempReview,[...reviews,tempReview]);
+  const geo=IP_GEO[ip]||null;
+  const topSim=reviews.map(r=>({r,s:similarity(text,r.text)})).sort((a,b)=>b.s-a.s).slice(0,3);
+
+  try{
+    const resp=await fetch('https://api.anthropic.com/v1/messages',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        model:'claude-sonnet-4-20250514',
+        max_tokens:1200,
+        messages:[{role:'user',content:`You are a fake review detection AI. Analyze this review submission and return ONLY valid JSON (no markdown, no extra text).
+
+Review: "${text}"
+Reviewer: ${user}
+IP Address: ${ip}
+Star Rating: ${rating}/5
+Local similarity score: ${localScore}/100
+
+Return this exact JSON structure:
+{
+  "fakeScore": <0-100>,
+  "verdict": "<Authentic|Suspicious|Likely Fake|Definite Fake>",
+  "confidence": <0-100>,
+  "signals": [<4-6 short signal strings>],
+  "ipRisk": "<Low|Medium|High|Critical>",
+  "attackType": "<None|Template Bot|Review Farm|Competitor Attack|Astroturfing>",
+  "linguisticDNA": "<2-3 word description of writing style>",
+  "recommendation": "<Block|Flag|Review|Approve>",
+  "reasoning": "<3-4 sentence analysis>"
+}`}]
+      })
+    });
+    const data=await resp.json();
+    const raw=(data.content||[]).map(b=>b.text||'').join('');
+    const result=JSON.parse(raw.replace(/```json|```/g,'').trim());
+    clearInterval(stageInterval);
+    showAnalysisResult(result,ip,geo,topSim,text);
+    addTimelineEvent(`AI analysis: ${result.verdict} (${result.fakeScore}/100)`,ip,result.fakeScore>60?'danger':result.fakeScore>35?'warning':'success');
+    if(result.recommendation==='Block')toast(`⚠ AI recommends blocking IP: ${ip}`,'error',5000);
+  }catch(e){
+    clearInterval(stageInterval);
+    showAnalysisResult({fakeScore:localScore,verdict:'Analysis Error',confidence:60,signals:['AI unavailable — using local scoring'],ipRisk:'Unknown',attackType:'Unknown',linguisticDNA:'Unknown',recommendation:'Review',reasoning:'Could not reach AI API. Local phylogenetic score used.'},ip,geo,topSim,text);
+  }
+  document.getElementById('analyze-loading').style.display='none';
+  btn.disabled=false;
+}
+
+function showAnalysisResult(r,ip,geo,topSim,text){
+  const color=r.fakeScore>60?'var(--red)':r.fakeScore>35?'var(--orange)':'var(--green)';
+  const circumference=2*Math.PI*38;
+  const dash=r.fakeScore/100*circumference;
+
+  const signalIcons={'generic phrasing':'🤖','repetitive language':'🔄','extreme rating':'⭐','short text':'📏','template pattern':'📋','vpn detected':'🌐','datacenter ip':'🏢','no specifics':'🎯','suspicious timing':'⏰','coordinated':'🕸'};
+
+  const html=`<div class="result-main">
+    <div class="result-hero" style="border-bottom:1px solid var(--border);">
+      <div>
+        <div class="result-score-big" style="color:${color}">${r.fakeScore}</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:2px">/ 100 RISK SCORE</div>
+      </div>
+      <div>
+        <div class="result-verdict-text" style="color:${color}">${(r.verdict||'').toUpperCase()}</div>
+        <div class="result-verdict-sub">CONFIDENCE: ${r.confidence||'—'}%</div>
+        <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">
+          <span style="font-size:9px;background:rgba(0,245,255,.1);border:1px solid rgba(0,245,255,.2);color:var(--cyan);padding:2px 7px;border-radius:3px">🧬 ${r.linguisticDNA||'Unknown'}</span>
+          <span style="font-size:9px;background:rgba(191,90,242,.1);border:1px solid rgba(191,90,242,.3);color:var(--purple);padding:2px 7px;border-radius:3px">⚡ ${r.attackType||'None'}</span>
+        </div>
+      </div>
+      <svg width="90" height="90" viewBox="0 0 90 90" style="margin-left:auto;flex-shrink:0">
+        <circle cx="45" cy="45" r="38" fill="none" stroke="var(--border2)" stroke-width="8"/>
+        <circle cx="45" cy="45" r="38" fill="none" stroke="${color}" stroke-width="8"
+          stroke-dasharray="${dash} ${circumference}" stroke-dashoffset="${circumference*0.25}"
+          stroke-linecap="round" transform="rotate(-90 45 45)" style="filter:drop-shadow(0 0 6px ${color})"/>
+        <text x="45" y="50" text-anchor="middle" font-size="16" font-weight="700" fill="${color}" font-family="Orbitron,monospace">${r.fakeScore}</text>
+      </svg>
+    </div>
+    <div class="result-action-strip">
+      <button class="ras-btn block" onclick="blockIP('${ip}','Blocked from AI analysis')">🚫 BLOCK IP</button>
+      <button class="ras-btn flag" onclick="toast('Review flagged for human review','info')">🚩 FLAG</button>
+      <button class="ras-btn approve" onclick="toast('Review approved','success')">✓ APPROVE</button>
+      <div style="margin-left:auto;font-size:9px;padding:4px 10px;border-radius:4px;font-weight:700;color:${color};border:1px solid ${color}40;background:${color}10">⚡ ${(r.recommendation||'REVIEW').toUpperCase()}</div>
+    </div>
+    <div class="result-body">
+      <div class="result-section-label" style="font-size:9px;color:var(--muted);letter-spacing:.15em;margin-bottom:8px">DETECTED SIGNALS</div>
+      <div class="result-signals-grid">${(r.signals||[]).map(s=>{
+        const icon=Object.entries(signalIcons).find(([k])=>s.toLowerCase().includes(k))?.[1]||'⚠';
+        return `<div class="signal-item"><span class="si-icon">${icon}</span>${s}</div>`;
+      }).join('')}</div>
+      <div class="dna-section">
+        <div class="dna-title">LINGUISTIC DNA FINGERPRINT</div>
+        <div class="dna-bar">${text.split(/\s+/).map(w=>{
+          const h=w.split('').reduce((a,c)=>a+c.charCodeAt(0),0)%360;
+          return `<div class="dna-chunk" style="background:hsl(${h},70%,35%);flex:${Math.max(1,w.length*.4)}">${w[0]||'?'}</div>`;
+        }).join('')}</div>
+        <div style="font-size:9px;color:var(--muted)">Each segment = one word token. Color = lexical hash. Similar patterns across reviews indicate template origin.</div>
+      </div>
+      ${geo?`<div class="dna-section">
+        <div class="dna-title">IP INTELLIGENCE: ${ip}</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:10px;color:var(--text)">
+          <div>📍 ${geo.city}, ${geo.country}</div>
+          <div>🏢 ${geo.isp}</div>
+          <div>🔌 ${geo.type}</div>
+          <div style="color:${geo.risk>70?'var(--red)':'var(--green)'};font-weight:700">⚠ Risk: ${geo.risk}%</div>
+        </div>
+      </div>`:''}
+      ${topSim.filter(x=>x.s>0.4).length?`<div class="dna-section">
+        <div class="dna-title">PHYLOGENETIC MATCHES (TOP SIMILAR REVIEWS)</div>
+        ${topSim.filter(x=>x.s>0.4).map(({r:sr,s})=>`
+          <div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border);font-size:10px">
+            <span style="color:var(--muted)">#${sr.id}</span>
+            <span style="flex:1;color:var(--text)">${sr.text.slice(0,60)}...</span>
+            <span style="color:${s>0.7?'var(--red)':'var(--orange)'};font-weight:700;font-family:'Orbitron',monospace">${(s*100).toFixed(0)}%</span>
+          </div>`).join('')}
+      </div>`:''}
+      <div class="result-section-label" style="font-size:9px;color:var(--muted);letter-spacing:.15em;margin-bottom:6px;margin-top:12px">AI REASONING</div>
+      <div class="reasoning-text">${r.reasoning||''}</div>
+    </div>
+  </div>`;
+  document.getElementById('analyze-result').innerHTML=html;
+  document.getElementById('analyze-result').style.display='block';
+}
+
+// ===================== SIMULATE ATTACK =====================
+let attackCounter=0;
+function simulateAttack(){
+  attackCounter++;
+  const templates=[
+    "Outstanding product! Absolutely love it. Best thing I bought this year!",
+    "Outstanding product! Absolutely love this. Best purchase of the year!",
+    "Outstanding! Absolutely love this product. Best buy of this year!",
+  ];
+  const attackIP=`185.220.${101+Math.floor(Math.random()*5)}.${Math.floor(Math.random()*255)}`;
+  IP_GEO[attackIP]={country:'Russia',city:'Moscow',risk:95,isp:'TorGuard VPN',type:'VPN/Proxy'};
+
+  templates.forEach((text,i)=>{
+    setTimeout(()=>{
+      const id=reviews.length+1;
+      reviews.push({id,text,author:`bot_${attackCounter}_${i}`,date:new Date().toISOString().split('T')[0],rating:5,ip:attackIP,blocked:false});
+      addTimelineEvent(`⚡ New review submitted (likely bot)`,attackIP,'danger');
+      updateStats();renderAll();
+      if(i===templates.length-1){
+        setTimeout(()=>{
+          toast(`🚨 Attack detected! ${templates.length} coordinated reviews from ${attackIP}`,'error',6000);
+          addTimelineEvent(`🚨 CAMPAIGN DETECTED: ${templates.length} fake reviews auto-blocked`,attackIP,'danger');
+          templates.forEach((_,j)=>{
+            const r=reviews.find(x=>x.text===templates[j]&&x.ip===attackIP);
+            if(r)r.blocked=true;
+          });
+          blockIP(attackIP,'Auto-blocked: Bot attack detected',true);
+          updateStats();renderAll();
+        },500);
+      }
+    },i*600);
+  });
+  toast(`⚡ Simulating bot attack from ${attackIP}...`,'info',3000);
+}
+
+function addReviewUI(){
+  const text=prompt('Enter review text to add:');
+  if(!text)return;
+  const ip=prompt('Enter reviewer IP (or leave blank for random):','198.51.100.'+Math.floor(Math.random()*255));
+  const id=reviews.length+1;
+  reviews.push({id,text:text.trim(),author:`user_new${id}`,date:new Date().toISOString().split('T')[0],rating:5,ip:ip||randomIP(),blocked:false});
+  addTimelineEvent(`New review added: #${id}`,ip,'info');
+  toast('Review added to network','success');
+  updateStats();renderAll();selectReview(id);
+}
+
+// ===================== NAV PANEL SWITCHING =====================
+function showPanel(name){
+  document.querySelectorAll('.nav-tab').forEach(t=>t.classList.toggle('active',t.dataset.panel===name));
+  document.querySelectorAll('.panel').forEach(p=>p.classList.toggle('active',p.id==='panel-'+name));
+  if(name==='reviews')renderReviews();
+  if(name==='ipblock')renderIPGrid();
+  if(name==='analytics')renderAnalytics();
+}
+
+document.querySelectorAll('.nav-tab').forEach(btn=>{
+  btn.addEventListener('click',()=>showPanel(btn.dataset.panel));
+});
+
+// ===================== RENDER ALL =====================
+function renderAll(){
+  renderTree();
+  renderRightPanel();
+  // Re-render active panel
+  const active=document.querySelector('.panel.active');
+  if(active){
+    const id=active.id.replace('panel-','');
+    if(id==='reviews')renderReviews();
+    if(id==='ipblock')renderIPGrid();
+    if(id==='analytics')renderAnalytics();
+  }
+}
+
+// ===================== LIVE DEMO EVENTS =====================
+function startLiveDemo(){
+  const events=[
+    {delay:2000,fn:()=>addTimelineEvent('System initialized — monitoring active','—','info')},
+    {delay:4000,fn:()=>addTimelineEvent('Review #1 analyzed: FAKE (score: 72)','185.220.101.45','danger')},
+    {delay:6000,fn:()=>addTimelineEvent('IP 185.220.101.45 flagged: VPN detected','185.220.101.45','warning')},
+    {delay:8000,fn:()=>addTimelineEvent('Phylogenetic cluster detected: 4 similar reviews','185.220.101.45','danger')},
+    {delay:10000,fn:()=>addTimelineEvent('Review #7 analyzed: SUSPICIOUS (score: 58)','45.142.212.100','warning')},
+    {delay:12000,fn:()=>addTimelineEvent('Campaign detection: Group of 3 reviews from Amsterdam datacenter','45.142.212.100','warning')},
+    {delay:15000,fn:()=>addTimelineEvent('Monitoring: 12 reviews processed, 5 flagged','—','info')},
+  ];
+  events.forEach(({delay,fn})=>setTimeout(fn,delay));
+}
+
+// ===================== INIT =====================
+updateStats();
+renderAll();
+startLiveDemo();
+addTimelineEvent('PhyloShield v3.0 initialized','—','info');
+// AUTO-SHIELD: scan all existing reviews on load
+setTimeout(()=>{
+  const blocked = autoShieldScan(false); // silent on load
+  if(blocked > 0){
+    addTimelineEvent(`🛡 Auto-Shield blocked ${blocked} fake review(s) on startup`, '—', 'danger');
+    toast(`🛡 Auto-Shield: ${blocked} fake review(s) auto-blocked on load`, 'error', 5000);
+    updateStats(); renderAll();
+  } else {
+    addTimelineEvent('🛡 Auto-Shield active — no threats on startup', '—', 'info');
+  }
+}, 800);
+addTimelineEvent('12 reviews loaded into phylogenetic analyzer','—','info');
